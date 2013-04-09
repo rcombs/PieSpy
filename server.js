@@ -96,11 +96,17 @@ function requestListener(req, res){
 				watchers[split[2]] = {
 					watcher: fs.watch(path.join(basePath, split[1], split[2], "current.json"), {}, function(event, filename){
 						fs.readFile(path.join(basePath, split[1], split[2], "current.json"), function(err, data){
+							var str = data.toString("utf8");
+							try{
+								JSON.parse(data.toString("utf8"));
+							}catch(e){
+								return; // BAD JSON, DON'T SEND
+							}
 							if(err){
 								return;
 							}else{
 								for(var i in reqs){
-									reqs[i].res.write("data: " + data + "\n\n");
+									reqs[i].res.write("data: " + str + "\n\n");
 								}
 							}
 						});
@@ -121,7 +127,7 @@ function requestListener(req, res){
 	}else if(split[0] == "static"){
 		if(split[1] == "icon"){
 			res.setHeader("content-type", "image/png");
-			fs.createReadStream("icon.png").pipe(res);
+			fs.createReadStream(path.join(__dirname, "icon.png")).pipe(res);
 		}
 	}else{
 		res.setHeader("content-type", "text/html");
@@ -130,7 +136,7 @@ function requestListener(req, res){
 		if(split.length > 1){
 			title = "Social Graph - #" + split[1] + " on " + split[0];
 			var imgsrc = path.join(ROOT, "graphs", split[0], split[1], "png");
-			fs.readFile(path.join(basePath, "graphs", split[0], split[1], "current.json"), function(err, content){
+			fs.readFile(path.join(basePath, split[0], split[1], "current.json"), function(err, content){
 				if(err){
 					res.end(homepageFile.replace("%TITLE%", title).replace("%JSON%", "false").replace("%IMGSRC%", imgsrc));
 				}else{
