@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>%TITLE%</title>
+		<link rel="shortcut icon" href="%ROOT%/static/icon">
+		<style>
+			#canvas{
+				display: block; float: left;
+			}
+			#ads{
+				float: right;
+			}
+		</style>
+<script type="text/javascript">
+
+  var _gaq = _gaq || [];
+  _gaq.push(['_setAccount', 'UA-22477858-1']);
+
+  (function() {
+    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+  })();
+
+</script>
+		<script>
+			var base = "%ROOT%"
+			var path = location.pathname.toLowerCase().split(base)[1].split("/").slice(1);
+			var borderSize = 60;
+			var WIDTH = (window.innerWidth - 25) - borderSize * 3 - 130,
+				HEIGHT = (window.innerHeight - 50) - borderSize * 2;
+			var ES;
+			var edgeThreshold = 0.2;
+			var currentFrame = 0,
+				frameIncrementValue = 0.016666666666666666;
+			var nextJSON = false;
+			var current = {
+				network: path[0],
+				channel: path[1],
+				graph:   {limits: {}, date: "", edges: {}, nodes: {}}
+			}
+			function weightedAverage(x, y, f){
+				if(x > y){
+					return f * Math.abs(x - y) + Math.min(x, y);
+				}else if(x < y){
+					return Math.max(x, y) - f * Math.abs(x - y);
+				}else{
+					return x;
+				}
+			}
+			function weightedAverageWithSin(x, y, f){
+				var z = weightedAverage(x, y, f);
+				if(f == 1 || f == 0){
+					return z;
+				}
+				return z * ((Math.cos(Math.PI * 2 * f) + 1) / 3 + .33333);
+			}
+			function startEventSource(){
+				ES = new EventSource(base + "/es/" + current.network + "/" + current.channel);
+				ES.addEventListener("message", function(event){
+					var res = JSON.parse(event.data);
+					var oldJSON = current.graph;
+					current.graph = res;
+					drawGraph(res, oldJSON);
+					console.log("Got New JSON");
+				}, false);
+			}
+			function stopEventSource(){
+				try{
+					ES.close();
+				}catch(e){
+					// gulp(e);
+				}
+			}
+			window.requestAnimationFrame || (window.requestAnimationFrame = (window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame || window.msRequestAnimationFrame || function(cb){setTimeout(cb, 17)}));
+			function drawFrame(graph, old){
+				if(currentFrame > 1){
+					currentFrame = 1;
+				}
+				var canvas = document.getElementById("canvas");
+				canvas.width = WIDTH + borderSize * 3;
+				canvas.height = HEIGHT + borderSize * 2;
+				// Easy way to clear a canvas; also lets me resize at will
+				var ctx = canvas.getContext("2d");
+				ctx.strokeStyle = "#666666";
+				ctx.strokeRect(0, 0, canvas.width, canvas.height);
+				ctx.fillStyle = "#eeeeff";
+				ctx.font = "64pt Helvetica Bold";
+				ctx.fillText(graph.channel, borderSize + 20, 90);
+				ctx.fillStyle = "#9999cc";
+				ctx.font = "18pt Helvetica Bold";
+				ctx.fillText("A Social Network Diagram for an IRC Channel", borderSize, borderSize - 25);
+				ctx.font = "12pt Helvetica";
+				ctx.fillText("Generated using Rodger Combs's modified PieSpy script", borderSize, HEIGHT + borderSize * 2 - 5 - 45);
+				ctx.fillText("Blue edge thickness and shortness represents strength of relationship", borderSize, HEIGHT + borderSize * 2 - 5 - 30);
+				ctx.fillText("Node size represents count and strength of relationships", borderSize, HEIGHT + borderSize * 2 - 5 - 15);
+				ctx.fillText("http://www.jibble.org/piespy/ - This frame was drawn at " + new Date(graph.time), borderSize, HEIGHT + borderSize * 2 - 5);
+				var maxWeight = weightedAverage(graph.limits.maxWeight, old.limits.maxWeight, currentFrame);
+				var maxNodeWeight = weightedAverage(graph.limits.maxNodeWeight, old.limits.maxNodeWeight, currentFrame);
+				var maxX = weightedAverage(graph.limits.maxX, old.limits.maxX, currentFrame),
+					maxY = weightedAverage(graph.limits.maxY, old.limits.maxY, currentFrame),
+					minX = weightedAverage(graph.limits.minX, old.limits.minX, currentFrame),
+					minY = weightedAverage(graph.limits.minY, old.limits.minY, currentFrame);
+				// Draw all the edges
+				for(var i = 0; i < graph.edges.length; i++){
+					var edge = graph.edges[i];
+					var oldEdge = {
+						source: edge.source,
+						target: edge.target,
+						weight: 0
+					}
+					for(var j = 0; j < old.edges.length; j++){
+						if(old.edges[j].source.lowerCaseNick == edge.source.lowerCaseNick && old.edges[j].target.lowerCaseNick == edge.target.lowerCaseNick){
+							oldEdge = old.edges[j];
+							break;
+						}
+					}
+					var weight = weightedAverage(edge.weight, oldEdge.weight, currentFrame);
+					if(weight <= edgeThreshold){
+						continue;
+					}
+					var nodeA = edge.source;
+					var nodeB = edge.target;
+					var oldNodeA = oldEdge.source;
+					var oldNodeB = oldEdge.target;
+					var x1 = (WIDTH * (weightedAverage(nodeA.x, oldNodeA.x, currentFrame) - minX) / (maxX - minX)) + borderSize;
+					var y1 = (HEIGHT * (weightedAverage(nodeA.y, oldNodeA.y, currentFrame) - minY) / (maxY - minY)) + borderSize;
+					var x2 = (WIDTH * (weightedAverage(nodeB.x, oldNodeB.x, currentFrame) - minX) / (maxX - minX)) + borderSize;
+					var y2 = (HEIGHT * (weightedAverage(nodeB.y, oldNodeB.y, currentFrame) - minY) / (maxY - minY)) + borderSize;
+					var oldAlpha = oldEdge.weight ? ((102 + (153 * oldEdge.weight / maxWeight)) / 255) : 0;
+					var newAlpha = edge.weight ? (102 + (153 * weight / maxWeight)) / 255 : 0;
+					var alpha;
+					if(nodeA.lowerCaseNick == graph.source.toLowerCase() && nodeB.lowerCaseNick == graph.target.toLowerCase()){
+						alpha = weightedAverageWithSin(newAlpha, oldAlpha, currentFrame);
+					}else{
+						alpha = weightedAverage(newAlpha, oldAlpha, currentFrame);
+					}
+					ctx.strokeStyle = "rgba(102, 102, 255, " + alpha + ")";
+					ctx.lineWidth = (Math.log(weight + 1) * 0.5) + 1;
+					ctx.beginPath();
+					ctx.moveTo(x1, y1);
+					ctx.lineTo(x2, y2);
+					ctx.stroke();
+				}
+				// Draw all the nodes
+				for(var i = 0; i < graph.nodes.length; i++){
+					var node = graph.nodes[i];
+					var oldNode = {
+						x: node.x,
+						y: node.y,
+						alpha: 0
+					};
+					for(var j = 0; j < old.nodes.length; j++){
+						if(old.nodes[j].lowerCaseNick == node.lowerCaseNick){
+							oldNode = {
+								x: old.nodes[j].x,
+								y: old.nodes[j].y,
+								alpha: 1
+							}
+						}
+					}
+					var alpha;
+					if(node.lowerCaseNick == graph.source.toLowerCase() || node.lowerCaseNick == graph.target.toLowerCase()){
+						alpha = weightedAverageWithSin(node.alpha || 1, oldNode.alpha, currentFrame);
+					}else{
+						alpha = weightedAverage(node.alpha || 1, oldNode.alpha, currentFrame);
+					}
+					var x1 = (WIDTH * (weightedAverage(node.x, oldNode.x, currentFrame) - minX) / (maxX - minX)) + borderSize;
+					var y1 = (HEIGHT * (weightedAverage(node.y, oldNode.y, currentFrame) - minY) / (maxY - minY)) + borderSize;
+					ctx.fillStyle = "rgba(255, 255, 0, " + alpha + ")";
+					ctx.strokeStyle = "rgba(102, 102, 255, " + alpha + ")";
+					ctx.lineWidth = 2;
+					ctx.beginPath();
+					var weight = weightedAverage(node.weight, oldNode.weight, currentFrame);
+					var radius = (5 + (5 * weight / maxNodeWeight));
+					ctx.arc(x1, y1, radius, 0, Math.PI*2, true);
+					ctx.stroke();
+					ctx.fill();
+					ctx.fillStyle = "rgba(0, 0, 0, " + alpha + ")";
+					ctx.fillText(node.nick, x1 + radius, y1 - radius);
+				}
+				if(currentFrame != 1){
+					currentFrame += frameIncrementValue;
+					requestAnimationFrame(function(){drawFrame(graph, old)});
+				}else{
+					currentFrame = 0;
+					if(nextJSON){
+						var next = nextJSON;
+						nextJSON = false;
+						requestAnimationFrame(function(){drawFrame(next, graph)});
+					}
+				}
+			}
+			function drawGraph(graph, old){
+				if(currentFrame){
+					nextJSON = graph;
+				}else{
+					if(old){
+						currentFrame = 0;
+					}else{
+						currentFrame = 1;
+						old = graph;
+					}
+					drawFrame(graph, old);
+				}
+			}
+			function requestGraph(graph){
+				stopEventSource();
+				var xhr = new XMLHttpRequest();
+				xhr.open("GET", base + "/graphs/" + current.network + "/" + current.channel, true);
+				xhr.addEventListener("load", function(){
+					var res = JSON.parse(xhr.responseText);
+					var oldJSON = current.graph;
+					current.graph = res;
+					drawGraph(res, oldJSON);
+					startEventSource();
+				}, false);
+				history.replaceState({network: current.network, channel: current.channel}, "#" + current.channel + " on " + current.network, base + "/" + current.network + "/" + current.channel);
+				_gaq.push(['_trackPageview']);
+				xhr.send();
+			}
+			function requestChannels(network){
+				stopEventSource();
+				var xhr = new XMLHttpRequest();
+				xhr.open("GET", base + "/graphs/" + network, true);
+				xhr.addEventListener("load", function(){
+					var res = JSON.parse(xhr.responseText);
+					var optgroup = document.getElementById("channels");
+					optgroup.innerHTML = "";
+					var gotCurrent = false;
+					for(var i = 0; i < res.length; i++){
+						var opt = document.createElement("option");
+						opt.innerHTML = "#" + res[i];
+						opt.value = res[i];
+						if(res[i].toLowerCase() == current.channel || (i == res.length - 1 && !gotCurrent)){
+							opt.selected = true;
+							current.channel = res[i].toLowerCase();
+							requestGraph();
+							gotCurrent = true;
+						}
+						optgroup.appendChild(opt);
+					}
+				}, false);
+				xhr.send();
+			}
+			window.addEventListener("resize", function(){
+				WIDTH = (window.innerWidth - 25) - borderSize * 3 - (adBlock ? 0 : 130),
+				HEIGHT = (window.innerHeight - 50) - borderSize * 2;
+				drawGraph(current.graph, false);
+			}, false);
+			window.addEventListener("popstate", function(){
+                
+			}, false);
+			window.addEventListener("DOMContentLoaded", function(){
+				var networkSelect = document.getElementById("networkSelect");
+				var channelSelect = document.getElementById("channelSelect");
+				networkSelect.addEventListener("change", function(){
+					current.network = this.value;
+					requestChannels(current.network);
+				}, false);
+				channelSelect.addEventListener("change", function(){
+					current.channel = this.value;
+					requestGraph(current.channel);
+				}, false);
+				var xhr = new XMLHttpRequest();
+				xhr.open("GET", base + "/graphs/", true);
+				xhr.addEventListener("load", function(){
+					var res = JSON.parse(xhr.responseText);
+					var optgroup = document.getElementById("networks");
+					for(var i = 0; i < res.length; i++){
+						var opt = document.createElement("option");
+						opt.innerHTML = res[i];
+						opt.value = res[i];
+						if(res[i].toLowerCase() == current.network){
+							opt.selected = true;
+							requestChannels(res[i]);
+						}
+						optgroup.appendChild(opt);
+					}
+				}, false);
+				xhr.send();
+			}, false);
+		</script>
+	</head>
+	<body>
+		<div style="height: 100%;">
+			<div>
+				<select id="networkSelect"><option disabled="disabled">Network</option><optgroup id="networks"></optgroup></select>
+				<select id="channelSelect"><option disabled="disabled">Channel</option><optgroup id="channels"></optgroup></select>
+			</div>
+			<div>
+				<canvas id="canvas" width="1000" height="1000" style="">
+					To see live-updating graphs, please turn on JS or update to a newer browser.<br>
+					<img src="%IMGSRC%">
+				</canvas>
+				<div id="ads">
+					<script type="text/javascript"><!--
+google_ad_client = "ca-pub-2414362208248834";
+/* Channel Maps */
+google_ad_slot = "8182327305";
+google_ad_width = 120;
+google_ad_height = 600;
+//-->
+					</script>
+					<script type="text/javascript"
+src="http://pagead2.googlesyndication.com/pagead/show_ads.js">
+					</script>
+					<script>
+						var adBlock = false;
+						if(document.getElementById("ads").scrollWidth < 100){
+							adBlock = true;
+						}
+		                                WIDTH = (window.innerWidth - 25) - borderSize * 3 - (adBlock ? 0 : 130),
+                		                HEIGHT = (window.innerHeight - 50) - borderSize * 2;
+					</script>
+				</div>
+			</div>
+		</div>
+	</body>
+</html>
